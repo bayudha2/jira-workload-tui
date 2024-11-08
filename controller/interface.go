@@ -58,6 +58,7 @@ type WorklogControllerType interface {
 	renderBody()
 	renderReload()
 	reloadActiveIndicator()
+  reloadActiveDateIndicator()
 	calculateTimespentHighlight(seconds int) string
 	mapWorklogData()
 	ListenFromController()

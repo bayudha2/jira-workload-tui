@@ -20,6 +20,11 @@ type WorklogProps struct {
 	Title      *string
 }
 
+type DateCursorTrack struct {
+	current [2]int
+	before  [2]int
+}
+
 type WorklogData struct {
 	date string
 	day  string
@@ -27,19 +32,21 @@ type WorklogData struct {
 }
 
 type WorklogController struct {
-	handler      termhandler.TermhandlerType
-	service      services.ServiceType
-	mutex        *sync.Mutex
-	globalChan   interface{}
-	localChan    chan string
-	loadingChan  chan struct{}
-	widgetNumber int
-	isActive     bool
-	isLoading    bool
-	dateCursor   int
-	props        WorklogProps
-	worklogData  []WorklogData
-	ReloadWLDesc func(int)
+	handler          termhandler.TermhandlerType
+	service          services.ServiceType
+	mutex            *sync.Mutex
+	globalChan       interface{}
+	localChan        chan string
+	loadingChan      chan struct{}
+	widgetNumber     int
+	isActive         bool
+	isLoading        bool
+	dateCursor       int
+	dateCursorBefore int
+	dateCursorTrack  DateCursorTrack
+	props            WorklogProps
+	worklogData      []WorklogData
+	ReloadWLDesc     func(int)
 }
 
 func NewWorklogController(
@@ -52,16 +59,21 @@ func NewWorklogController(
 	reloadWKDesc func(int),
 ) WorklogControllerType {
 	return &WorklogController{
-		handler:      *handler,
-		service:      *service,
-		mutex:        mutex,
-		globalChan:   globalChan,
-		localChan:    make(chan string, 2),
-		loadingChan:  make(chan struct{}),
-		widgetNumber: widgetNumber,
-		isActive:     false,
-		isLoading:    false,
-		dateCursor:   0,
+		handler:          *handler,
+		service:          *service,
+		mutex:            mutex,
+		globalChan:       globalChan,
+		localChan:        make(chan string, 2),
+		loadingChan:      make(chan struct{}),
+		widgetNumber:     widgetNumber,
+		isActive:         false,
+		isLoading:        false,
+		dateCursor:       0,
+		dateCursorBefore: 0,
+		dateCursorTrack: DateCursorTrack{
+			current: [2]int{1, 2},
+			before:  [2]int{1, 2},
+		},
 		props:        worklogsProps,
 		ReloadWLDesc: reloadWKDesc,
 	}
@@ -87,9 +99,17 @@ func (w *WorklogController) ListenFromController() {
 				}
 
 				w.mutex.Lock()
+				w.dateCursorTrack.before = w.dateCursorTrack.current
+				w.dateCursorTrack.current = [2]int{
+					w.dateCursorTrack.current[0],
+					w.dateCursorTrack.current[1] - 6,
+				}
+
+				w.dateCursorBefore = w.dateCursor
 				w.dateCursor -= 7
-				w.renderBody()
+				w.reloadActiveDateIndicator()
 				w.mutex.Unlock()
+
 				w.ReloadWLDesc(w.dateCursor)
 			case GoDown:
 				if (w.dateCursor+7 > len(w.worklogData)-1) || w.isLoading {
@@ -97,9 +117,17 @@ func (w *WorklogController) ListenFromController() {
 				}
 
 				w.mutex.Lock()
+				w.dateCursorTrack.before = w.dateCursorTrack.current
+				w.dateCursorTrack.current = [2]int{
+					w.dateCursorTrack.current[0],
+					w.dateCursorTrack.current[1] + 6,
+				}
+
+				w.dateCursorBefore = w.dateCursor
 				w.dateCursor += 7
-				w.renderBody()
+				w.reloadActiveDateIndicator()
 				w.mutex.Unlock()
+
 				w.ReloadWLDesc(w.dateCursor)
 			case GoLeft:
 				if w.dateCursor == 0 || w.isLoading {
@@ -107,9 +135,24 @@ func (w *WorklogController) ListenFromController() {
 				}
 
 				w.mutex.Lock()
+				w.dateCursorTrack.before = w.dateCursorTrack.current
+				if w.dateCursor%7 == 0 {
+					w.dateCursorTrack.current = [2]int{
+						91,
+						w.dateCursorTrack.current[1] - 6,
+					}
+				} else {
+					w.dateCursorTrack.current = [2]int{
+						w.dateCursorTrack.current[0] - 15,
+						w.dateCursorTrack.current[1],
+					}
+				}
+
+				w.dateCursorBefore = w.dateCursor
 				w.dateCursor--
-				w.renderBody()
+				w.reloadActiveDateIndicator()
 				w.mutex.Unlock()
+
 				w.ReloadWLDesc(w.dateCursor)
 			case GoRight:
 				if (w.dateCursor == len(w.worklogData)-1) || w.isLoading {
@@ -117,12 +160,31 @@ func (w *WorklogController) ListenFromController() {
 				}
 
 				w.mutex.Lock()
+				w.dateCursorTrack.before = w.dateCursorTrack.current
+				if (w.dateCursor+1)%7 == 0 {
+					w.dateCursorTrack.current = [2]int{
+						1,
+						w.dateCursorTrack.current[1] + 6,
+					}
+				} else {
+					w.dateCursorTrack.current = [2]int{
+						w.dateCursorTrack.current[0] + 15,
+						w.dateCursorTrack.current[1],
+					}
+				}
+
+				w.dateCursorBefore = w.dateCursor
 				w.dateCursor++
-				w.renderBody()
+				w.reloadActiveDateIndicator()
 				w.mutex.Unlock()
+
 				w.ReloadWLDesc(w.dateCursor)
 			case LoadingData:
 				w.dateCursor = 0
+				w.dateCursorTrack = DateCursorTrack{
+					current: [2]int{1, 2},
+					before:  [2]int{1, 2},
+				}
 				w.worklogData = []WorklogData{}
 				w.isLoading = true
 				w.renderReload()
@@ -261,14 +323,6 @@ func (w *WorklogController) renderBody() {
 					day := "  "
 					highlight := ""
 
-					// OPTIMIZE: "Glitch when changing dateCursor too fast".
-					// refactor dateCursor change render method,
-					// create temp var to keep track of active date number position
-					// when change, re-render previous active date number, update
-					// the new number with hightlight, possible change:
-					// not using renderBody on dateCursor change, instead create
-					// new func to render date number (or each date number on the list).
-
 					if dateIndex < len(w.worklogData) {
 						if w.dateCursor == dateIndex {
 							highlight = "\033[37;44;1;3m"
@@ -378,6 +432,40 @@ func (w *WorklogController) renderReload() {
 			}
 		}
 	}()
+}
+
+func (w *WorklogController) reloadActiveDateIndicator() {
+	w.handler.MoveCursor(
+		termhandler.Position{
+			w.props.RenderPosX + w.dateCursorTrack.before[0],
+			w.props.RenderPosY + w.dateCursorTrack.before[1],
+		},
+	)
+
+	dateBeforeNum := fmt.Sprintf("%d", w.dateCursorBefore)
+	if w.dateCursorBefore < 10 {
+		dateBeforeNum = fmt.Sprintf("0%d", w.dateCursorBefore)
+	}
+
+	w.handler.Draw(dateBeforeNum)
+
+	w.handler.MoveCursor(
+		termhandler.Position{
+			w.props.RenderPosX + w.dateCursorTrack.current[0],
+			w.props.RenderPosY + w.dateCursorTrack.current[1],
+		},
+	)
+
+	highlight := "\033[37;44;1;3m"
+
+	dateNum := fmt.Sprintf("%d", w.dateCursor)
+	if w.dateCursor < 10 {
+		dateNum = fmt.Sprintf("0%d", w.dateCursor)
+	}
+
+	w.handler.Draw(fmt.Sprintf("%s%s\033[0m", highlight, dateNum))
+
+	w.handler.Render()
 }
 
 func (w *WorklogController) reloadActiveIndicator() {

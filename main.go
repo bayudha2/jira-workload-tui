@@ -14,8 +14,8 @@ func main() {
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 
-  // setup config
-  cfg := config.NewConfig()
+	// setup config
+	cfg := config.NewConfig()
 
 	// setup program
 	thandler := termhandler.NewTermHandler()
