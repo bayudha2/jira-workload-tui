@@ -1,5 +1,7 @@
 package services
 
+import "time"
+
 // members
 type pageInfo struct {
 	HasNextPage bool   `json:"hasNextPage"`
@@ -79,6 +81,7 @@ type WorklogRes struct {
 type Logs struct {
 	TimeRange string
 	Comment   string
+  Started   time.Time
 }
 
 type FormattedWorklogData struct {
