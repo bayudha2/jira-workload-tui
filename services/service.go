@@ -330,7 +330,6 @@ func (s *ServiceApp) mapWorklogData(
 		}
 		s.mutex.Unlock()
 
-    // TODO: sort worklog time in day
 		timeSpent := worklog.TimeSpentSeconds
 
 		s.mutex.Lock()
@@ -346,16 +345,54 @@ func (s *ServiceApp) mapWorklogData(
 		timeRange := fmt.Sprintf("%s - %s", startTime, endTime)
 
 		s.mutex.Lock()
-		wkData[day] = FormattedWorklogData{
-			TimeSpent: wkData[day].TimeSpent + timeSpent,
-			Logs: append(wkData[day].Logs, Logs{
+		wkLogs := wkData[day].Logs
+		logs := []Logs{}
+
+		if len(wkLogs) > 0 {
+			logs = s.sortLogs(wkLogs, parsed, Logs{
 				Comment:   worklog.Comment,
 				TimeRange: timeRange,
-			}),
+				Started:   parsed,
+			})
+		} else {
+			logs = append(wkLogs, Logs{
+				Comment:   worklog.Comment,
+				TimeRange: timeRange,
+				Started:   parsed,
+			})
+		}
+
+		wkData[day] = FormattedWorklogData{
+			TimeSpent: wkData[day].TimeSpent + timeSpent,
+			Logs:      logs,
 		}
 		s.mutex.Unlock()
 	}
 	s.localWg.Done()
+}
+
+// Does place new item in exact location sequentially according to date clock
+func (s *ServiceApp) sortLogs(arrLogs []Logs, current time.Time, newItem Logs) []Logs {
+	var iPrevP *int
+	res := []Logs{}
+
+	for i := 0; i < len(arrLogs); i++ {
+		if arrLogs[len(arrLogs)-i-1].Started.After(current) {
+			iPrevP = &i
+		}
+	}
+
+	if iPrevP != nil {
+		arrLogsCopy := make([]Logs, len(arrLogs))
+		copy(arrLogsCopy, arrLogs)
+
+		arrLogsL := append(arrLogsCopy[:len(arrLogsCopy)-*iPrevP-1], newItem)
+		res = append(arrLogsL, arrLogs[len(arrLogs)-*iPrevP-1:]...)
+	} else {
+		res = append(arrLogs, newItem)
+	}
+
+	return res
 }
 
 // InitService implements ServiceType.

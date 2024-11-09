@@ -3,6 +3,7 @@ package services
 import (
 	"io"
 	"net/http"
+	"time"
 )
 
 type ServiceType interface {
@@ -18,4 +19,5 @@ type ServiceType interface {
 	createRequest(string, string, io.Reader) (*http.Request, error)
 	formatWorklogsData(WorklogRes)
 	mapWorklogData([]WorklogsWorklog, map[int]FormattedWorklogData, *int, *int, *int)
+  sortLogs([]Logs, time.Time, Logs) []Logs
 }
