@@ -31,15 +31,15 @@ func NewConfig() JiraConfigType {
 	teamId := os.Getenv("ATLASSIAN_TEAM_ID")
 	project := os.Getenv("ATLASSIAN_PROJECT")
 
-	if env, notValid := utils.ValidateENVs(map[string]string{
+	if err := utils.ValidateENVs(map[string]string{
 		"email":     email,
 		"userToken": userToken,
 		"baseURL":   baseURL,
 		"orgId":     orgId,
 		"teamId":    teamId,
 		"project":   project,
-	}); notValid {
-		log.Fatalf("Error setup env config: %v", *env)
+	}); err != nil {
+		log.Fatalf("Error setup env config: %v", err)
 		return nil
 	}
 

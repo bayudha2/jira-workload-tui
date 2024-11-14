@@ -104,7 +104,7 @@ func FormatSecondToHourMinute(seconds int, isLongFormat bool) string {
 	return sMinutes
 }
 
-func FormatCommentDesc(s string, n int, char rune) []string {
+func FormatCommentDesc(s string, n int) []string {
 	normalizedT := strings.ReplaceAll(s, "\n", " ")
 	normalizedT = strings.Join(strings.Fields(normalizedT), " ")
 	if len(normalizedT) > n*4 {
@@ -130,22 +130,16 @@ func FormatCommentDesc(s string, n int, char rune) []string {
 func GetWorkDays(month int, year int) (int, int) {
 	tMonth := 0
 	tToday := 0
-	if month == 0 || year == 0 {
+
+	if month <= 0 || year <= 0 {
+		log.Printf("error month or/and year is not valid number")
 		return tMonth, tToday
 	}
 
 	now := time.Now()
 	startDate, lastDate := CalculateRangeDateInMonth(month, year)
-	parsedStartDate, err := time.Parse("2006-01-02", startDate)
-	if err != nil {
-		log.Println("error getting work days (start date): %v", err)
-		return tMonth, tToday
-	}
-	parsedLastDate, err := time.Parse("2006-01-02", lastDate)
-	if err != nil {
-		log.Println("error getting work days (end date): %v", err)
-		return tMonth, tToday
-	}
+	parsedStartDate, _ := time.Parse("2006-01-02", startDate)
+	parsedLastDate, _ := time.Parse("2006-01-02", lastDate)
 
 	weekDayCountWhole := getWeekdays(parsedStartDate, parsedLastDate)
 	if month < int(now.Month()) && year <= now.Year() { // given month is behind of current month
@@ -188,12 +182,12 @@ func getlastDateOfMonth(month int, year int) int {
 	return firstOfNextMonth.AddDate(0, 0, -1).Day()
 }
 
-func ValidateENVs(envs map[string]string) (*string, bool) {
+func ValidateENVs(envs map[string]string) error {
 	for key, val := range envs {
 		if val == "" {
-			return &key, true
+			return fmt.Errorf("error validating: %s", key)
 		}
 	}
 
-	return nil, false
+	return nil
 }
