@@ -232,7 +232,7 @@ func (w *WorklogDescController) renderBody() {
 		w.handler.Draw(emptyDesc)
 		if w.wdCursor == i && len(w.logsData) > 0 {
 			emptyDesc = w.logsData[i+w.offsite].Comment
-			descs := utils.FormatCommentDesc(emptyDesc, 88, '\n')
+			descs := utils.FormatCommentDesc(emptyDesc, 88)
 
 			for i, desc := range descs {
 				w.handler.MoveCursor(
