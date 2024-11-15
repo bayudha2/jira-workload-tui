@@ -26,6 +26,7 @@ const (
 	ResetCursor string = "reset_cursor"
 	LoadingData string = "loading_data"
 	ReloadData  string = "reload_data"
+	ErrorFetch  string = "error_fetch"
 )
 
 type ControllerChild map[int]chan<- string
@@ -228,11 +229,18 @@ func (c *Controller) ListenKeyPress() {
 					wdChan, _ := c.controllersChild[2]
 					dashChan, _ := c.controllersChild[4]
 					wdChan <- LoadingData
-					c.service.FetchIssues(services.FetchWorklogPayload{
+
+					err := c.service.FetchIssues(services.FetchWorklogPayload{
 						Year:  year,
 						Month: month,
 						Name:  name,
 					})
+					if err != nil {
+						c.channelIsFetching[aw] = false
+						wdChan <- ErrorFetch
+						return
+					}
+
 					wdChan <- ReloadData
 					dashChan <- ReloadData
 					c.channelIsFetching[aw] = false

@@ -197,6 +197,29 @@ func (w *WorklogController) ListenFromController() {
 				w.mapWorklogData()
 				w.renderBody()
 				w.mutex.Unlock()
+			case ErrorFetch:
+				w.loadingChan <- struct{}{}
+				w.isLoading = false
+
+				w.mutex.Lock()
+				w.handler.MoveCursor(
+					termhandler.Position{
+						w.props.RenderPosX + 1,
+						w.props.RenderPosY + 2,
+					},
+				)
+				w.handler.Draw("             ")
+				w.handler.Render()
+
+				w.handler.MoveCursor(
+					termhandler.Position{
+						w.props.RenderPosX + 1,
+						w.props.RenderPosY + 2,
+					},
+				)
+				w.handler.Draw("\x1b[31;1m failed\x1b[0m")
+				w.handler.Render()
+				w.mutex.Unlock()
 			case "1", "2", "3":
 				charNum, err := strconv.Atoi(resChan)
 				if err != nil {

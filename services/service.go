@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 	"tui/config"
@@ -56,12 +57,14 @@ func NewService(
 	config *config.JiraConfigType,
 ) ServiceType {
 	return &ServiceApp{
-		wg:         wg,
-		mutex:      mutex,
-		localWg:    new(sync.WaitGroup),
-		handler:    *handler,
-		config:     *config,
-		client:     &http.Client{},
+		wg:      wg,
+		mutex:   mutex,
+		localWg: new(sync.WaitGroup),
+		handler: *handler,
+		config:  *config,
+		client: &http.Client{
+			Timeout: 5 * time.Second,
+		},
 		accoundIds: resultMember{},
 		users:      []userValues{},
 		worklogs:   WorklogData{},
@@ -91,6 +94,19 @@ func (s *ServiceApp) createRequest(
 	return req, nil
 }
 
+func (s *ServiceApp) handleFailedFetch() {
+	s.handler.MoveCursor(termhandler.Position{2, 2})
+	s.handler.Draw(strings.Repeat(" ", 100))
+	s.handler.Render()
+
+	s.handler.MoveCursor(termhandler.Position{1, 1})
+	s.handler.Draw("failed to fetch member team, please check your internet connection")
+	s.handler.ShowCursor()
+	s.handler.Render()
+
+	os.Exit(0)
+}
+
 // FetchMembers implements ServiceType.
 func (s *ServiceApp) FetchMembers() {
 	baseURI := s.config.GetAtlassianURL()
@@ -106,16 +122,12 @@ func (s *ServiceApp) FetchMembers() {
 
 	req, err := s.createRequest(http.MethodPost, urlFetchMember, nil)
 	if err != nil {
-		// TODO: handle when fail creating request
-		log.Printf("error creating new req: %v", err)
-		return
+		panic(fmt.Sprintf("error creating request member: %v ", err))
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		// TODO: handle when fail fetching members
-		log.Printf("error fetching member team: %v", err)
-		return
+		s.handleFailedFetch()
 	}
 	defer resp.Body.Close()
 
@@ -140,16 +152,12 @@ func (s *ServiceApp) FetchUsers() {
 	)
 	req, err := s.createRequest(http.MethodGet, urlGetUsers, nil)
 	if err != nil {
-		// TODO: handle when fail creating request
-		log.Printf("error creating req: %v", err)
-		return
+		panic(fmt.Sprintf("error creating request user: %v ", err))
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		// TODO: handle when fail fetching users
-		log.Printf("error getting users: %v", err)
-		return
+		s.handleFailedFetch()
 	}
 	defer resp.Body.Close()
 
@@ -158,6 +166,65 @@ func (s *ServiceApp) FetchUsers() {
 	decoder.Decode(&bodyRes)
 
 	s.users = bodyRes.Values
+}
+
+func (s *ServiceApp) FetchIssues(param FetchWorklogPayload) error {
+	baseURI := s.config.GetAtlassianURL()
+	project := s.config.GetJiraProject()
+
+	var user userValues
+	url := fmt.Sprintf("%s/rest/api/2/search", baseURI)
+
+	fromDate, toDate := utils.CalculateRangeDateInMonth(param.Month, param.Year)
+	getSpesificUser(s.users, &user, param.Name)
+
+	payload := fmt.Sprintf(`{
+    "jql": "project IN (%s) AND assignee = %s AND worklogDate >= %s AND worklogDate <= %s ORDER BY created DESC",
+    "fields": ["worklog"]
+    }`, project, user.AccountId, fromDate, toDate)
+
+	payloadReader := bytes.NewReader([]byte(payload))
+	req, err := s.createRequest(http.MethodPost, url, payloadReader)
+	if err != nil {
+		return err
+	}
+
+	res, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	decoder := json.NewDecoder(res.Body)
+	var resBody WorklogRes
+	decoder.Decode(&resBody)
+	s.worklogs.Month = param.Month
+	s.worklogs.Year = param.Year
+	s.worklogs.Name = param.Name
+
+	if err = s.formatWorklogsData(resBody); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *ServiceApp) FetchWorklogs(id string) (*WorklogField, error) {
+	baseURI := s.config.GetAtlassianURL()
+	url := fmt.Sprintf("%s/rest/api/2/issue/%s/worklog", baseURI, id)
+	req, err := s.createRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	var resBody WorklogField
+	json.NewDecoder(res.Body).Decode(&resBody)
+	return &resBody, nil
 }
 
 // GetUsersData implements ServiceType.
@@ -189,68 +256,6 @@ func (s *ServiceApp) GetSummaryLog() SummaryLog {
 	return s.summaryLog
 }
 
-func (s *ServiceApp) FetchIssues(param FetchWorklogPayload) {
-	baseURI := s.config.GetAtlassianURL()
-	project := s.config.GetJiraProject()
-
-	var user userValues
-	url := fmt.Sprintf("%s/rest/api/2/search", baseURI)
-
-	fromDate, toDate := utils.CalculateRangeDateInMonth(param.Month, param.Year)
-	getSpesificUser(s.users, &user, param.Name)
-
-	payload := fmt.Sprintf(`{
-    "jql": "project IN (%s) AND assignee = %s AND worklogDate >= %s AND worklogDate <= %s ORDER BY created DESC",
-    "fields": ["worklog"]
-    }`, project, user.AccountId, fromDate, toDate)
-
-	payloadReader := bytes.NewReader([]byte(payload))
-	req, err := s.createRequest(http.MethodPost, url, payloadReader)
-	if err != nil {
-		// TODO: handle when fail creating request
-		log.Printf("error creating req: %v", err)
-		return
-	}
-
-	res, err := s.client.Do(req)
-	if err != nil {
-		// TODO: handle when fail Fetching worklog
-		log.Printf("error fetching issues: %v", err)
-		return
-	}
-	defer res.Body.Close()
-
-	decoder := json.NewDecoder(res.Body)
-	var resBody WorklogRes
-	decoder.Decode(&resBody)
-	s.worklogs.Month = param.Month
-	s.worklogs.Year = param.Year
-	s.worklogs.Name = param.Name
-	s.formatWorklogsData(resBody)
-}
-
-func (s *ServiceApp) FetchWorklogs(id string) *WorklogField {
-	baseURI := s.config.GetAtlassianURL()
-	url := fmt.Sprintf("%s/rest/api/2/issue/%s/worklog", baseURI, id)
-	req, err := s.createRequest(http.MethodGet, url, nil)
-	if err != nil {
-		// TODO: handle when fail creating request
-		log.Printf("error creating req: %v", err)
-		return nil
-	}
-
-	res, err := s.client.Do(req)
-	if err != nil {
-		// TODO: handle when fail Fetching worklog
-		log.Printf("error fetching worklog: %v", err)
-		return nil
-	}
-	defer res.Body.Close()
-	var resBody WorklogField
-	json.NewDecoder(res.Body).Decode(&resBody)
-	return &resBody
-}
-
 func getSpesificUser(items []userValues, item *userValues, name string) {
 	for _, user := range items {
 		if user.DisplayName == name {
@@ -260,8 +265,9 @@ func getSpesificUser(items []userValues, item *userValues, name string) {
 	}
 }
 
-func (s *ServiceApp) formatWorklogsData(worklogData WorklogRes) {
+func (s *ServiceApp) formatWorklogsData(worklogData WorklogRes) error {
 	wkData := map[int]FormattedWorklogData{}
+	var isError error
 	lastDate := 0
 	totalTimeSpent := 0
 	totalWorklog := 0
@@ -270,7 +276,11 @@ func (s *ServiceApp) formatWorklogsData(worklogData WorklogRes) {
 		s.localWg.Add(1)
 		go func(issueItem IssuesWorklog) {
 			if issueItem.Fields.Worklog.Total > 20 {
-				wlField := s.FetchWorklogs(issueItem.Id)
+				wlField, err := s.FetchWorklogs(issueItem.Id)
+				if err != nil {
+					isError = err
+				}
+
 				s.mapWorklogData(
 					wlField.Worklogs,
 					wkData,
@@ -305,6 +315,12 @@ func (s *ServiceApp) formatWorklogsData(worklogData WorklogRes) {
 		LastDate: lastDate,
 		Data:     wkData,
 	}
+
+	if isError != nil {
+		return isError
+	}
+
+	return nil
 }
 
 func (s *ServiceApp) mapWorklogData(
